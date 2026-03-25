@@ -30,3 +30,12 @@ Save and exit:
 
 ```bash
 git add README.md
+
+
+## One-click bootstrap
+
+```bash
+bash scripts/install-validator.sh
+
+
+MONIKER=my-validator ALYX_VERSION=v0.1.0 bash scripts/install-validator.sh
