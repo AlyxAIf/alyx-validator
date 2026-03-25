@@ -15,158 +15,127 @@ CHECKSUM_URL="${CHECKSUM_URL:-$DOWNLOAD_BASE/$CHAIN_ID/$ALYX_VERSION/linux-amd64
 GENESIS_URL="${GENESIS_URL:-$NETWORK_BASE/$CHAIN_ID/genesis.json}"
 ADDRBOOK_URL="${ADDRBOOK_URL:-$NETWORK_BASE/$CHAIN_ID/addrbook.json}"
 
+SEEDS="150de304a7f498bd10d68f9fe6698a6a7addd48f@46.224.111.93:26656"
+
 COSMOVISOR_BIN="${COSMOVISOR_BIN:-$HOME/go/bin/cosmovisor}"
 DAEMON_NAME="alyxd"
 
-echo "=================================================="
-echo "ALYX one-click validator bootstrap"
-echo "Chain ID:        $CHAIN_ID"
-echo "Moniker:         $MONIKER"
-echo "Home:            $ALYX_HOME"
-echo "Version:         $ALYX_VERSION"
-echo "Binary URL:      $BINARY_URL"
-echo "Checksum URL:    $CHECKSUM_URL"
-echo "Genesis URL:     $GENESIS_URL"
-echo "Addrbook URL:    $ADDRBOOK_URL"
-echo "=================================================="
+echo "============================================"
+echo " ALYX VALIDATOR BOOTSTRAP"
+echo "============================================"
+echo "Chain:     $CHAIN_ID"
+echo "Version:   $ALYX_VERSION"
+echo "Moniker:   $MONIKER"
+echo "============================================"
 
 if [[ "$(uname -s)" != "Linux" ]]; then
-  echo "This script supports Linux only."
+  echo "Linux required"
   exit 1
 fi
 
-if ! command -v sudo >/dev/null 2>&1; then
-  echo "sudo is required."
-  exit 1
-fi
-
-echo "[1/12] Installing base dependencies..."
+echo "[1/11] Installing dependencies..."
 sudo apt update
 sudo apt install -y curl wget jq git build-essential
 
 if ! command -v go >/dev/null 2>&1; then
-  echo
-  echo "Go is not installed."
-  echo "Install Go 1.24+ first, then re-run this script."
+  echo "Go 1.24+ required"
   exit 1
 fi
 
-echo "[2/12] Installing Cosmovisor if needed..."
+echo "[2/11] Installing Cosmovisor..."
 if [[ ! -x "$COSMOVISOR_BIN" ]]; then
   go install cosmossdk.io/tools/cosmovisor/cmd/cosmovisor@latest
-else
-  echo "Cosmovisor already present: $COSMOVISOR_BIN"
 fi
 
 export PATH="$HOME/go/bin:$PATH"
 
-echo "[3/12] Preparing directories..."
-mkdir -p "$ALYX_HOME/config"
-mkdir -p "$ALYX_HOME/data"
-mkdir -p "$ALYX_HOME/cosmovisor/genesis/bin"
-mkdir -p "$ALYX_HOME/cosmovisor/upgrades"
+echo "[3/11] Creating directories..."
+mkdir -p "$ALYX_HOME"/{config,data,cosmovisor/genesis/bin}
+
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-echo "[4/12] Downloading binary..."
+echo "[4/11] Downloading binary..."
 wget -q -O "$TMP_DIR/alyxd" "$BINARY_URL"
 chmod +x "$TMP_DIR/alyxd"
 
-echo "[5/12] Downloading checksum..."
-if wget -q -O "$TMP_DIR/sha256sum.txt" "$CHECKSUM_URL"; then
-  EXPECTED_SHA="$(awk '{print $1}' "$TMP_DIR/sha256sum.txt" | head -n1)"
-  ACTUAL_SHA="$(sha256sum "$TMP_DIR/alyxd" | awk '{print $1}')"
+echo "[5/11] Verifying checksum..."
+wget -q -O "$TMP_DIR/sha256sum.txt" "$CHECKSUM_URL"
 
-  echo "Expected SHA: $EXPECTED_SHA"
-  echo "Actual SHA:   $ACTUAL_SHA"
+EXPECTED=$(awk '{print $1}' "$TMP_DIR/sha256sum.txt")
+ACTUAL=$(sha256sum "$TMP_DIR/alyxd" | awk '{print $1}')
 
-  if [[ -n "$EXPECTED_SHA" && "$EXPECTED_SHA" != "$ACTUAL_SHA" ]]; then
-    echo "Checksum mismatch. Aborting."
-    exit 1
-  fi
-else
-  echo "Warning: checksum download failed. Continuing without checksum verification."
+if [[ "$EXPECTED" != "$ACTUAL" ]]; then
+  echo "Checksum mismatch"
+  exit 1
 fi
 
-echo "[6/12] Installing binary into Cosmovisor genesis path..."
+echo "Checksum OK"
+
+echo "[6/11] Installing binary..."
 install -m 755 "$TMP_DIR/alyxd" "$ALYX_HOME/cosmovisor/genesis/bin/alyxd"
 sudo ln -sf "$ALYX_HOME/cosmovisor/genesis/bin/alyxd" /usr/local/bin/alyxd
 
-echo "[7/12] Initializing node home if needed..."
+echo "[7/11] Initializing node..."
 if [[ ! -f "$ALYX_HOME/config/node_key.json" ]]; then
   alyxd init "$MONIKER" --chain-id "$CHAIN_ID" --home "$ALYX_HOME"
-else
-  echo "Node home already initialized. Skipping init."
 fi
 
-echo "[8/12] Downloading network files..."
+echo "[8/11] Downloading network files..."
 wget -q -O "$ALYX_HOME/config/genesis.json" "$GENESIS_URL"
+wget -q -O "$ALYX_HOME/config/addrbook.json" "$ADDRBOOK_URL" || true
 
-if wget -q -O "$ALYX_HOME/config/addrbook.json" "$ADDRBOOK_URL"; then
-  echo "Addrbook downloaded."
-else
-  echo "Addrbook not found. Continuing without addrbook."
-fi
+echo "[9/11] Applying config optimizations..."
 
-echo "[9/12] Writing sane defaults..."
-sed -i 's|^indexer *=.*|indexer = "null"|' "$ALYX_HOME/config/config.toml" || true
-sed -i 's|^prometheus *=.*|prometheus = true|' "$ALYX_HOME/config/config.toml" || true
-sed -i 's|^minimum-gas-prices *=.*|minimum-gas-prices = "0ualyx"|' "$ALYX_HOME/config/app.toml" || true
+sed -i 's|^seeds *=.*|seeds = "'"$SEEDS"'"|' "$ALYX_HOME/config/config.toml"
+sed -i 's|^indexer *=.*|indexer = "null"|' "$ALYX_HOME/config/config.toml"
+sed -i 's|^prometheus *=.*|prometheus = true|' "$ALYX_HOME/config/config.toml"
 
-echo "[10/12] Writing systemd service..."
+sed -i 's|^minimum-gas-prices *=.*|minimum-gas-prices = "0ualyx"|' "$ALYX_HOME/config/app.toml"
+
+# pruning (important)
+sed -i 's|^pruning *=.*|pruning = "custom"|' "$ALYX_HOME/config/app.toml"
+sed -i 's|^pruning-keep-recent *=.*|pruning-keep-recent = "100"|' "$ALYX_HOME/config/app.toml"
+sed -i 's|^pruning-interval *=.*|pruning-interval = "10"|' "$ALYX_HOME/config/app.toml"
+
+echo "[10/11] Creating systemd service..."
+
 sudo tee /etc/systemd/system/alyxd.service >/dev/null <<EOF
 [Unit]
 Description=ALYX Validator
 After=network-online.target
-Wants=network-online.target
 
 [Service]
 User=$ALYX_USER
-Group=$ALYX_USER
 ExecStart=$HOME/go/bin/cosmovisor run start --home $ALYX_HOME
 Restart=always
 RestartSec=5
 LimitNOFILE=65535
-Environment="DAEMON_NAME=$DAEMON_NAME"
+
+Environment="DAEMON_NAME=alyxd"
 Environment="DAEMON_HOME=$ALYX_HOME"
-Environment="DAEMON_ALLOW_DOWNLOAD_BINARIES=false"
 Environment="DAEMON_RESTART_AFTER_UPGRADE=true"
-Environment="UNSAFE_SKIP_BACKUP=true"
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-echo "[11/12] Reloading systemd..."
+echo "[11/11] Starting node..."
+
 sudo systemctl daemon-reload
 sudo systemctl enable alyxd
-
-echo "[12/12] Starting validator service..."
 sudo systemctl restart alyxd
 
+sleep 3
+
+echo "============================================"
+echo "Node started"
+echo "============================================"
+
+curl -s http://127.0.0.1:26657/status | jq '.result.sync_info'
 echo
-echo "Bootstrap complete."
-echo
-echo "Useful commands:"
-echo "  sudo systemctl status alyxd --no-pager -l"
-echo "  journalctl -u alyxd -f"
-echo "  curl -s http://127.0.0.1:26657/status | jq"
-echo
-echo "Next steps:"
-echo "  1. Wait for sync"
-echo "  2. Create/import wallet"
-echo "  3. Fund wallet"
-echo "  4. Create validator"
-echo
-echo "Create wallet:"
-echo "  alyxd keys add validator"
-echo
-echo "Create validator:"
-echo "  alyxd tx staking create-validator \\"
-echo "    --amount=1000000ualyx \\"
-echo "    --from=validator \\"
-echo "    --chain-id=$CHAIN_ID \\"
-echo "    --commission-rate=0.10 \\"
-echo "    --moniker=\"$MONIKER\" \\"
-echo "    --gas auto \\"
-echo "    --fees 5000ualyx"
+echo "Next:"
+echo "1. Wait for full sync"
+echo "2. alyxd keys add validator"
+echo "3. Fund wallet"
+echo "4. Create validator"
