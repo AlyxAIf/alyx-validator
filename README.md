@@ -16,3 +16,17 @@ This repository provides:
 ```bash
 bash install.sh
 bash cosmovisor/setup.sh
+
+Chain
+Chain ID: alyxtest-4
+Denom: ualyx
+
+Save and exit:
+- `Ctrl+O`
+- `Enter`
+- `Ctrl+X`
+
+## 3. Mark the conflict as resolved
+
+```bash
+git add README.md
