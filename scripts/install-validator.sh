@@ -71,9 +71,30 @@ if ! command -v sudo >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "[1/13] Installing dependencies..."
-sudo apt update
-sudo apt install -y curl wget jq git build-essential
+echo "[1/13] Checking dependencies..."
+
+MISSING_DEPS=()
+
+for BIN in curl wget jq git go; do
+  if ! command -v "$BIN" >/dev/null 2>&1; then
+    MISSING_DEPS+=("$BIN")
+  fi
+done
+
+if [[ "${#MISSING_DEPS[@]}" -gt 0 ]]; then
+  echo "Missing dependencies: ${MISSING_DEPS[*]}"
+
+  if [[ "${SKIP_APT:-0}" == "1" ]]; then
+    echo "SKIP_APT=1 is set. Install the missing dependencies manually, then rerun."
+    exit 1
+  fi
+
+  echo "Attempting apt install..."
+  sudo apt update
+  sudo apt install -y curl wget jq git build-essential
+else
+  echo "All required dependencies are already installed."
+fi
 
 if ! command -v go >/dev/null 2>&1; then
   echo "Go is required to install Cosmovisor"
